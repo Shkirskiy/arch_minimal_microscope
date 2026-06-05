@@ -101,12 +101,14 @@ echo "          change 'mac' to '' in the localectl command."
 #
 # Flags:
 #   -m          : create the home directory /home/microscopist
-#   -G video,storage,optical,plugdev
+#   -G video,storage,optical
 #               : add to groups that grant hardware access:
 #                   video   = /dev/video* — the camera device node
 #                   storage = USB storage devices
 #                   optical = optical drives (future-proofing)
-#                   plugdev = plug-and-play devices (needed by udiskie)
+#               Note: USB mounting does NOT need a special group on Arch —
+#               udisks2 + polkit handle it automatically. (The 'plugdev'
+#               group from Debian/Ubuntu does not exist on Arch.)
 #   -s /bin/bash : use bash as the default shell
 
 echo ">>> [3/6] Creating microscopist user..."
@@ -114,7 +116,7 @@ echo ">>> [3/6] Creating microscopist user..."
 if id "microscopist" &>/dev/null; then
     echo "    User 'microscopist' already exists — skipping creation."
 else
-    useradd -m -G video,storage,optical,plugdev -s /bin/bash microscopist
+    useradd -m -G video,storage,optical -s /bin/bash microscopist
     echo "    User 'microscopist' created (no password — auto-login enabled)."
 fi
 
