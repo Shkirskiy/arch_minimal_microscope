@@ -122,51 +122,101 @@ fi
 
 
 # =============================================================================
-# SECTION 4 — Install Fiji to /opt/fiji
+# SECTION 4 — Install Fiji to /opt/fiji  (optional — failures don't abort)
 # =============================================================================
 # Fiji ("Fiji Is Just ImageJ") is a scientific image analysis application.
 # It is not in the Arch repositories, so we download it directly.
 #
-# Since Fiji 2.15.0 (February 2025), the launcher script is called 'fiji'
-# (a shell script), replacing the old 'ImageJ-linux64' binary.
+# Download source (x86_64 Linux, Java bundled):
+#   https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip
+#   - "linux64"  = x86_64 (correct for a normal PC and an x86_64 VM;
+#                   do NOT use the arm64 build on these machines)
+#   - "jdk"      = Java is bundled inside, so no separate Java install needed
+# Installed to: /opt/fiji/  (standard location for third-party system apps)
 #
-# Download source: https://downloads.imagej.net/fiji/latest/fiji-linux64.zip
-# Installed to:    /opt/fiji/  (standard location for third-party system apps)
+# IMPORTANT DESIGN NOTE:
+# This whole section is wrapped so that if the download or extraction fails,
+# the script PRINTS A WARNING AND CONTINUES to steps 5-6 instead of aborting.
+# Fiji is not required for the desktop/login to work, so a flaky download
+# should never block the core setup. This is done by running the work inside
+# an "if ! ( ... ); then warn; fi" block, which catches any failure locally.
 
 echo ">>> [4/6] Installing Fiji to /opt/fiji..."
 
-FIJI_URL="https://downloads.imagej.net/fiji/latest/fiji-linux64.zip"
+FIJI_URL="https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip"
 FIJI_ZIP="/tmp/fiji-linux64.zip"
 FIJI_DEST="/opt/fiji"
+FIJI_OK=0   # flag: did Fiji install succeed? (0 = no, 1 = yes)
 
 if [ -d "$FIJI_DEST" ]; then
     echo "    /opt/fiji already exists — skipping Fiji download."
-    echo "    To reinstall, remove /opt/fiji first: rm -rf /opt/fiji"
+    echo "    To reinstall, remove it first: sudo rm -rf /opt/fiji"
+    FIJI_OK=1
 else
-    echo "    Downloading Fiji (this may take a few minutes)..."
-    wget -q --show-progress -O "$FIJI_ZIP" "$FIJI_URL"
+    # The parentheses ( ) run these commands in a "subshell".
+    # If any command inside fails, the subshell exits non-zero, and the
+    # "if (" catches it — so 'set -e' does NOT kill the whole script here.
+    if ( set -e
+        echo "    Downloading Fiji (~650 MB, this may take a few minutes)..."
+        # No -q this time, so you can SEE the download progress and any error.
+        wget -O "$FIJI_ZIP" "$FIJI_URL"
 
-    echo "    Extracting..."
-    # Fiji's zip contains a folder called "Fiji.app"
-    # We extract to /tmp first, then move it to /opt/fiji
-    unzip -q "$FIJI_ZIP" -d /tmp/fiji-extract
+        echo "    Extracting..."
+        rm -rf /tmp/fiji-extract
+        unzip -q "$FIJI_ZIP" -d /tmp/fiji-extract
 
-    mv /tmp/fiji-extract/Fiji.app "$FIJI_DEST"
+        # The zip extracts to a single top-level folder, but its exact name
+        # has changed across Fiji versions (e.g. "Fiji.app" or "Fiji").
+        # Rather than hard-code it, we DISCOVER it: take the first directory
+        # found inside the extraction folder and move it to /opt/fiji.
+        INNER=$(find /tmp/fiji-extract -mindepth 1 -maxdepth 1 -type d | head -n1)
+        if [ -z "$INNER" ]; then
+            echo "    ERROR: could not find extracted Fiji folder."
+            exit 1
+        fi
+        mv "$INNER" "$FIJI_DEST"
 
-    # Make the launcher script executable
-    # The launcher is a shell script called 'fiji' at the root of the install
-    chmod +x "$FIJI_DEST/fiji"
-
-    # Clean up the downloaded zip
-    rm -f "$FIJI_ZIP"
-    rm -rf /tmp/fiji-extract
-
-    echo "    Fiji installed to $FIJI_DEST"
+        # Clean up
+        rm -f "$FIJI_ZIP"
+        rm -rf /tmp/fiji-extract
+    ); then
+        FIJI_OK=1
+        echo "    Fiji files installed to $FIJI_DEST"
+    else
+        echo ""
+        echo "    !!! WARNING: Fiji download/extraction FAILED."
+        echo "    !!! The rest of the setup will continue normally."
+        echo "    !!! You can install Fiji later — see the notes at the end."
+        echo ""
+        rm -f "$FIJI_ZIP"
+        rm -rf /tmp/fiji-extract
+    fi
 fi
 
-# Give the microscopist user ownership of Fiji so it can update itself
-# (Fiji has a built-in updater that needs write access to its own directory)
-chown -R microscopist:microscopist "$FIJI_DEST"
+# If Fiji installed, find its launcher and make a stable shortcut.
+# The launcher's name/location varies by version, so we SEARCH for it:
+#   - newer builds: a shell script called 'fiji'
+#   - older builds: a binary called 'ImageJ-linux64'
+# We then symlink whichever we find to /usr/local/bin/fiji, which is on the
+# system PATH — so autostart can simply call "fiji" without knowing the path.
+if [ "$FIJI_OK" -eq 1 ]; then
+    FIJI_LAUNCHER=$(find "$FIJI_DEST" -maxdepth 2 -type f \
+        \( -name 'fiji' -o -name 'ImageJ-linux64' \) | head -n1)
+
+    if [ -n "$FIJI_LAUNCHER" ]; then
+        chmod +x "$FIJI_LAUNCHER"
+        ln -sf "$FIJI_LAUNCHER" /usr/local/bin/fiji
+        echo "    Fiji launcher found: $FIJI_LAUNCHER"
+        echo "    Shortcut created: /usr/local/bin/fiji"
+    else
+        echo "    WARNING: Fiji installed but no launcher found inside it."
+        echo "             Autostart will skip Fiji until this is resolved."
+        FIJI_OK=0
+    fi
+
+    # Give microscopist ownership so Fiji's built-in updater can write to itself
+    chown -R microscopist:microscopist "$FIJI_DEST"
+fi
 
 
 # =============================================================================
@@ -260,9 +310,13 @@ pcmanfm --daemon-mode &
 # Launch the camera preview and capture application
 guvcview &
 
-# Launch Fiji (scientific image analysis)
-# The launcher script is called 'fiji' (updated in Fiji 2.15+)
-/opt/fiji/fiji &
+# Launch Fiji (scientific image analysis) if it is installed.
+# The setup script created a 'fiji' shortcut in /usr/local/bin (on PATH).
+# 'command -v fiji' checks whether that shortcut exists before running it,
+# so the session won't error if Fiji wasn't installed.
+if command -v fiji >/dev/null 2>&1; then
+    fiji &
+fi
 EOF
 
 chmod +x "$OPENBOX_CFG/autostart"
@@ -288,17 +342,43 @@ echo "    [x] System updated"
 echo "    [x] All packages installed (Xorg, LightDM, Openbox, guvcview...)"
 echo "    [x] French AZERTY (Mac) keyboard layout set"
 echo "    [x] 'microscopist' user created"
-echo "    [x] Fiji downloaded and installed to /opt/fiji"
+if [ "$FIJI_OK" -eq 1 ]; then
+echo "    [x] Fiji installed to /opt/fiji (shortcut: /usr/local/bin/fiji)"
+else
+echo "    [ ] Fiji NOT installed (download failed) — see manual steps below"
+fi
 echo "    [x] LightDM enabled with auto-login as microscopist"
-echo "    [x] Openbox configured with autostart (guvcview + Fiji + tint2)"
+echo "    [x] Openbox configured with autostart (guvcview + tint2)"
 echo "    [x] USB auto-mount configured (udiskie)"
 echo ""
 echo "  On next boot:"
 echo "    - LightDM starts automatically"
 echo "    - microscopist logs in without a password"
-echo "    - Openbox starts with tint2, guvcview, and Fiji"
+echo "    - Openbox starts with tint2 and guvcview"
+if [ "$FIJI_OK" -eq 1 ]; then
+echo "    - Fiji launches automatically"
+fi
 echo "    - USB drives are auto-mounted when plugged in"
 echo ""
+
+if [ "$FIJI_OK" -ne 1 ]; then
+echo "  ----------------------------------------------------------"
+echo "  TO INSTALL FIJI MANUALLY (if the download failed):"
+echo "  ----------------------------------------------------------"
+echo "    1. Download it:"
+echo "       wget -O /tmp/fiji.zip \\"
+echo "         https://downloads.imagej.net/fiji/latest/fiji-latest-linux64-jdk.zip"
+echo "    2. Extract and move into place:"
+echo "       unzip /tmp/fiji.zip -d /tmp/fiji-extract"
+echo "       sudo mv /tmp/fiji-extract/* /opt/fiji"
+echo "    3. Create the launcher shortcut (adjust name if needed):"
+echo "       sudo ln -sf \"\$(find /opt/fiji -maxdepth 2 -name fiji -type f | head -n1)\" /usr/local/bin/fiji"
+echo "       sudo chmod +x /opt/fiji/fiji"
+echo "    4. Fix ownership:"
+echo "       sudo chown -R microscopist:microscopist /opt/fiji"
+echo ""
+fi
+
 echo "  NOTE on keyboard layout:"
 echo "    This script sets the Mac French AZERTY variant."
 echo "    If you are on a standard PC keyboard, edit the script and"
