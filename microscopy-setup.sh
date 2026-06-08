@@ -87,11 +87,19 @@ pacman -Syu --noconfirm \
 
 echo ">>> [2/6] Setting French AZERTY keyboard layout..."
 
+# This writes a PERMANENT config file: /etc/X11/xorg.conf.d/00-keyboard.conf
+# X reads it every time the graphical session starts, so it survives reboots.
 localectl set-x11-keymap fr pc105 mac
 
-echo "    Keyboard layout set to: French (Mac AZERTY)"
+# Also set the TEXT CONSOLE (TTY) keymap, written to /etc/vconsole.conf.
+# This covers the black text screen you see if you ever leave the desktop.
+# Harmless if you never use the console; it just keeps both consistent.
+localectl set-keymap fr
+
+echo "    Keyboard layout set to: French (Mac AZERTY), graphical + console"
+echo "    Permanent: written to /etc/X11/xorg.conf.d/00-keyboard.conf"
 echo "    NOTE: If this is a standard PC keyboard, edit this script and"
-echo "          change 'mac' to '' in the localectl command."
+echo "          change 'mac' to '' in the set-x11-keymap command."
 
 
 # =============================================================================
@@ -280,9 +288,39 @@ echo ">>> [6/6] Setting up Openbox and autostart for microscopist..."
 OPENBOX_CFG=/home/microscopist/.config/openbox
 mkdir -p "$OPENBOX_CFG"
 
-# Copy default Openbox configs
-cp /etc/xdg/openbox/rc.xml   "$OPENBOX_CFG/rc.xml"
-cp /etc/xdg/openbox/menu.xml "$OPENBOX_CFG/menu.xml"
+# Copy the default rc.xml (keybindings, window behaviour) as a base.
+cp /etc/xdg/openbox/rc.xml "$OPENBOX_CFG/rc.xml"
+
+# Write a CUSTOM right-click menu (menu.xml) instead of the default.
+# In Openbox, right-clicking the desktop opens this menu. It is the
+# built-in launcher. We give it our four apps plus a Log Out option.
+# Each <item> has a label and an Execute action running a command.
+cat > "$OPENBOX_CFG/menu.xml" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Menu">
+    <item label="Terminal">
+      <action name="Execute"><command>xterm</command></action>
+    </item>
+    <item label="Copy Files (USB)">
+      <action name="Execute"><command>pcmanfm</command></action>
+    </item>
+    <item label="Camera (guvcview)">
+      <action name="Execute"><command>guvcview</command></action>
+    </item>
+    <item label="Fiji">
+      <action name="Execute"><command>fiji</command></action>
+    </item>
+    <separator />
+    <item label="Reconfigure Openbox">
+      <action name="Reconfigure" />
+    </item>
+    <item label="Log Out">
+      <action name="Exit"><prompt>yes</prompt></action>
+    </item>
+  </menu>
+</openbox_menu>
+EOF
 
 # Write the autostart script.
 # The 'cat > file << EOF' syntax writes everything between EOF markers
@@ -304,10 +342,15 @@ tint2 &
 # --no-notify : suppress desktop notifications (we have no notification daemon)
 udiskie --no-notify &
 
-# File manager in background (stays resident, opens quickly when needed)
-pcmanfm --daemon-mode &
+# Draw the desktop: wallpaper + clickable icons read from ~/Desktop.
+# pcmanfm --desktop turns pcmanfm into the desktop manager (it shows the
+# icons we place in ~/Desktop). Clicking the "Copy Files" icon later will
+# open a normal pcmanfm file-browser window.
+pcmanfm --desktop &
 
-# Launch the camera preview and capture application
+# Launch the camera preview and capture application.
+# NOTE: guvcview needs a camera to be connected. With no camera it will
+# report "not connected" and close — that is expected, not an error.
 guvcview &
 
 # Launch Fiji (scientific image analysis) if it is installed.
@@ -321,10 +364,77 @@ EOF
 
 chmod +x "$OPENBOX_CFG/autostart"
 
+# -----------------------------------------------------------------------------
+# Desktop launcher icons (~/Desktop)
+# -----------------------------------------------------------------------------
+# pcmanfm --desktop (set in autostart above) shows icons placed in ~/Desktop.
+# Each icon is a ".desktop" file — a small text file describing an app:
+#   Type=Application   : this launches a program
+#   Name=...           : the label shown under the icon
+#   Exec=...           : the command to run when double-clicked
+#   Icon=...           : an icon name from the system icon theme
+#   Terminal=false     : don't open a terminal window to run it
+# We mark them executable so pcmanfm launches them on click without warning.
+
+echo "    Creating desktop icons..."
+
+DESKTOP_DIR=/home/microscopist/Desktop
+mkdir -p "$DESKTOP_DIR"
+
+# Icon 1 — Copy Files (opens the file manager for USB transfers)
+cat > "$DESKTOP_DIR/copy-files.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Copy Files (USB)
+Comment=Open the file manager to copy images to a USB drive
+Exec=pcmanfm
+Icon=system-file-manager
+Terminal=false
+EOF
+
+# Icon 2 — Terminal
+cat > "$DESKTOP_DIR/terminal.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Open a command-line terminal
+Exec=xterm
+Icon=utilities-terminal
+Terminal=false
+EOF
+
+# Icon 3 — Camera
+cat > "$DESKTOP_DIR/camera.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Camera
+Comment=Live camera preview and image capture
+Exec=guvcview
+Icon=camera-web
+Terminal=false
+EOF
+
+# Icon 4 — Fiji (only created if Fiji actually installed)
+if [ "$FIJI_OK" -eq 1 ]; then
+cat > "$DESKTOP_DIR/fiji.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Fiji
+Comment=Scientific image analysis (ImageJ)
+Exec=fiji
+Icon=applications-graphics
+Terminal=false
+EOF
+fi
+
+# Make all the icons executable so pcmanfm runs them on double-click
+chmod +x "$DESKTOP_DIR"/*.desktop
+
 # Fix ownership: this script runs as root, but all files inside
 # /home/microscopist must belong to the microscopist user, not root.
 # -R = recursive (applies to everything inside the directory)
 chown -R microscopist:microscopist /home/microscopist/.config
+chown -R microscopist:microscopist /home/microscopist/Desktop
 chown -R microscopist:microscopist /home/microscopist/.local 2>/dev/null || true
 
 
