@@ -45,6 +45,7 @@ pacman -Syu --noconfirm \
     v4l-utils \
     guvcview \
     pcmanfm \
+    firefox \
     udisks2 \
     udiskie \
     unzip \
@@ -65,6 +66,7 @@ pacman -Syu --noconfirm \
 #                          inspect camera devices (e.g. v4l2-ctl --list-devices)
 #   guvcview             : Camera live preview and image/video capture (UVC)
 #   pcmanfm              : Lightweight file manager — for copying files to USB
+#   firefox              : Web browser
 #   udisks2              : System service enabling USB drive mounting
 #   udiskie              : User tool that auto-mounts USB drives on plug-in
 #   unzip                : Needed to extract the Fiji .zip archive
@@ -305,16 +307,16 @@ cat > "$OPENBOX_CFG/menu.xml" << 'EOF'
     <item label="Copy Files (USB)">
       <action name="Execute"><command>pcmanfm</command></action>
     </item>
-    <item label="Camera (guvcview)">
+    <item label="Firefox">
+      <action name="Execute"><command>firefox</command></action>
+    </item>
+    <item label="Camera (Microscope)">
       <action name="Execute"><command>guvcview</command></action>
     </item>
     <item label="Fiji">
       <action name="Execute"><command>fiji</command></action>
     </item>
     <separator />
-    <item label="Reconfigure Openbox">
-      <action name="Reconfigure" />
-    </item>
     <item label="Log Out">
       <action name="Exit"><prompt>yes</prompt></action>
     </item>
@@ -414,7 +416,18 @@ Icon=camera-web
 Terminal=false
 EOF
 
-# Icon 4 — Fiji (only created if Fiji actually installed)
+# Icon 4 — Firefox
+cat > "$DESKTOP_DIR/firefox.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Firefox
+Comment=Web browser
+Exec=firefox
+Icon=firefox
+Terminal=false
+EOF
+
+# Icon 5 — Fiji (only created if Fiji actually installed)
 if [ "$FIJI_OK" -eq 1 ]; then
 cat > "$DESKTOP_DIR/fiji.desktop" << 'EOF'
 [Desktop Entry]
